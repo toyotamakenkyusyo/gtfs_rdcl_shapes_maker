@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+	<head>
+		<meta charset="UTF-8" />
+		<style>body {font-family: IPAmjMincho;} pre {font-family: IPAmjMincho; white-space: pre-wrap;}</style>
+		<script src="https://cdn.jsdelivr.net/npm/zlibjs@0.3.1/bin/unzip.min.js"></script>
+		<script src="shape.js"></script>
+	</head>
+	<body>
+		<div id="div_1"></div>
+		<script type="text/javascript">
+		//<![CDATA[
+f_async();
+
+async function f_async() {
+	document.getElementById("div_1").innerHTML += await f_all("GTFS-JP_nbaux-gunma-jp.zip"); //ここにGTFSのファイル名（パス）を入れる
+}
+
+
+		//]]>
+		</script>
+	</body>
+</html>
