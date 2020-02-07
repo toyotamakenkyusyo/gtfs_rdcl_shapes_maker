@@ -1,0 +1,2 @@
+# gtfs_rdcl_shapes_maker
+国土地理院ベクトルタイル中心線を用いてGTFSのshapes.txtを作るJavaScriptです。
