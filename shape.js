@@ -16,6 +16,7 @@ async function f_all(a_url) {
 		}
 	}
 	f_number_gtfs(c_json);
+	f_make_shape(c_json);
 	const c_tile_list = {};//必要なタイル
 	f_lonlat_to_xy(c_tile_list, c_json, c_zoom_level);
 	console.log(c_tile_list);
@@ -527,12 +528,59 @@ function f_number_gtfs(a_data) {
 	for (let i1 = 0; i1 < a_data["stop_times"].length; i1++) {
 		a_data["stop_times"][i1]["stop_sequence"] = Number(a_data["stop_times"][i1]["stop_sequence"]);
 	}
-	for (let i1 = 0; i1 < a_data["shapes"].length; i1++) {
-		a_data["shapes"][i1]["shape_pt_lat"] = Number(a_data["shapes"][i1]["shape_pt_lat"]);
-		a_data["shapes"][i1]["shape_pt_lon"] = Number(a_data["shapes"][i1]["shape_pt_lon"]);
-		a_data["shapes"][i1]["shape_pt_sequence"] = Number(a_data["shapes"][i1]["shape_pt_sequence"]);
+	if (a_data["shapes"] !== undefined && a_data["shapes"].length !== 0) {
+		for (let i1 = 0; i1 < a_data["shapes"].length; i1++) {
+			a_data["shapes"][i1]["shape_pt_lat"] = Number(a_data["shapes"][i1]["shape_pt_lat"]);
+			a_data["shapes"][i1]["shape_pt_lon"] = Number(a_data["shapes"][i1]["shape_pt_lon"]);
+			a_data["shapes"][i1]["shape_pt_sequence"] = Number(a_data["shapes"][i1]["shape_pt_sequence"]);
+		}
 	}
 }
+
+
+function f_make_shape(a_data) {
+	if (a_data["shapes"] === undefined || a_data["shapes"].length === 0) {
+		let l_shapes = [];
+		for (let i1 = 0; i1 < a_data["routes"].length; i1++) {
+			let l_trip_id; //代表のtrip_id
+			console.log(a_data["routes"]);
+			for (let i2 = 0; i2 < a_data["trips"].length; i2++) {
+				if (a_data["routes"][i1]["route_id"] === a_data["trips"][i2]["route_id"]) { //tripを1つみつける。
+					l_trip_id = a_data["trips"][i2]["trip_id"];
+					a_data["trips"][i2]["shape_id"] = "shape_id_" + a_data["routes"][i1]["route_id"];
+				}
+			}
+			const c_shape_temp = []; //仮にstop_timesと緯度経度を集める
+			for (let i2 = 0; i2 < a_data["stop_times"].length; i2++) {
+				if (a_data["stop_times"][i2]["trip_id"] === l_trip_id) {
+					for (let i3 = 0; i3 < a_data["stops"].length; i3++) {
+						if (a_data["stop_times"][i2]["stop_id"] === a_data["stops"][i3]["stop_id"]) {
+							c_shape_temp.push({
+								"shape_id": "shape_id_" + a_data["routes"][i1]["route_id"],
+								"shape_pt_lat": a_data["stops"][i3]["stop_lat"],
+								"shape_pt_lon": a_data["stops"][i3]["stop_lon"],
+								"shape_pt_sequence": a_data["stop_times"][i2]["stop_sequence"]
+							});
+							break;
+						}
+					}
+				}
+			}
+			c_shape_temp.sort(function(a1,a2) {
+				if (a1["shape_pt_sequence"] < a2["shape_pt_sequence"]) {
+					return -1;
+				}
+				if (a1["shape_pt_sequence"] > a2["shape_pt_sequence"]) {
+					return 1;
+				}
+				return 0;
+			});
+			l_shapes = l_shapes.concat(c_shape_temp);
+		}
+		a_data["shapes"] = l_shapes;
+	}
+}
+
 
 function f_lonlat_to_xy(a_tile_list, a_data, a_zoom_level) {
 	for (let i1 = 0; i1 < a_data["stops"].length; i1++) {
