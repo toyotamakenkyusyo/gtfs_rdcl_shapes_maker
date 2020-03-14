@@ -1,2 +1,2 @@
 # gtfs_rdcl_shapes_maker
-国土地理院ベクトルタイル中心線を用いてGTFSのshapes.txtを作るJavaScriptです。shapes_maker.xhtmlにGTFSのファイル名を入れ、ブラウザで開くと数分でshapes.txtが自動で作られます。
+国土地理院ベクトルタイル中心線を用いてGTFSのshapes.txtを作るJavaScriptです。shapes_maker.xhtmlをウェブブラウザで開き、GTFSのファイルを指定すると、数分でshapes.txtが自動で作られます。
