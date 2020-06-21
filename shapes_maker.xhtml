@@ -15,12 +15,17 @@
 		<div id="div_output"></div>
 		<script>
 		//<![CDATA[
+//経路検索のループはこの回数まで
+const c_loop = 800; //永井運輸、上信電鉄
+
+
 const c_reader = new FileReader();
 c_reader.addEventListener("load", f_main, false);
+
 document.getElementById("input").onchange = f_read;
 
 function f_read(a) {
-	document.getElementById("div_status").innerHTML ="ここ";
+	document.getElementById("div_status").innerHTML ="読み込み開始";
 	c_reader.readAsArrayBuffer(a.target.files[0]);
 }
 
@@ -39,6 +44,9 @@ async function f_main() {
 	}
 	f_number_gtfs(c_json);
 	f_make_shape(c_json);
+	console.log(c_json);
+	//throw new Error();
+	
 	const c_tile_list = {};//必要なタイル
 	f_lonlat_to_xy(c_tile_list, c_json, c_zoom_level);
 	console.log(c_tile_list);
@@ -46,6 +54,7 @@ async function f_main() {
 	const c_tile = {};
 	for (let i1 in c_tile_list) {
 		const c_url = "https://cyberjapandata.gsi.go.jp/xyz/experimental_rdcl/16/" + String(c_tile_list[i1]["x_16"]) + "/" + c_tile_list[i1]["y_16"] + ".geojson";
+		//const c_url = "http://localhost/rdcl.php?dir=" + String(c_tile_list[i1]["x_16"]) + "&url=" + String(c_tile_list[i1]["y_16"]) + ".geojson";
 		try {
 			c_tile_list[i1]["geojson"] = JSON.parse((await f_xhr_get(c_url, "text")).responseText);
 		} catch(e) {
@@ -58,39 +67,54 @@ async function f_main() {
 	//前後の点を入れる
 	const c_points = {};
 	console.time("t2");
-	const c_ranks = {"3m未満": 2, "3m-5.5m未満": 1, "5.5m-13m未満": 0.5,"13m-19.5m未満": 0.5, "19.5m以上": 0.5};
+	
+	//設定
+	//対応用
+	const c_ranks1 = {"3m未満": 1.5, "3m-5.5m未満": 1.5, "5.5m-13m未満": 1,"13m-19.5m未満": 1, "19.5m以上": 0.75}; //永井運輸、上信電鉄
+	//経路検索用
+	const c_ranks2 = {"3m未満": 2, "3m-5.5m未満": 2, "5.5m-13m未満": 1,"13m-19.5m未満": 1, "19.5m以上": 1}; //永井運輸、上信電鉄
+	//長いリンクを区切る長さ、単位は[1/度]
+	//緯度1度=111km→10mごとに区切るなら10000分の1
+	const c_min_distance = 12000; //永井運輸、上信電鉄
+	
+	
 	for (let i1 in c_tile_list) {
 		const c_x_16 = c_tile_list[i1]["x_16"];
 		const c_y_16 = c_tile_list[i1]["y_16"];
 		const c_features = c_tile_list[i1]["geojson"]["features"];
 		for (let i2 = 0; i2 < c_features.length; i2++) {
 			const c_properties = c_features[i2]["properties"];
-			if (c_properties["rnkWidth"] === "3m未満") {
-				//continue;//うまくいかない（太い道が孤立？）
-			}
-			let l_rank = c_ranks[c_properties["rnkWidth"]];
-			if (c_properties["type"] !== "通常部") {
-				//continue;//歩道等は除く
-				//うまく接続されない？
-				if (l_rank !== "3m未満") {
-					//l_rank = "3m-5.5m未満"; //通常部以外はrankを下げる、うまくいかない
-				}
-			}
-			const c_rank = l_rank;
 			const c_coordinates = c_features[i2]["geometry"]["coordinates"];
-			//距離を求める
-			//区切る長さ
-			//緯度1度=111km→10mごとに区切る？なら10000分の1
-			let l_min_distance = 3000 //単位は/度？
-			if (c_properties["rnkWidth"] === "3m未満" || c_properties["rnkWidth"] === "3m-5.5m未満") {
-				l_min_distance *= 2; //狭い道路を長く補正
+			
+			if (c_properties["rID"] === "50064-13098-i-3625") { //前橋駅前
+				c_properties["rnkWidth"] = "19.5m以上";
 			}
-			const c_distances = []; //分割数（距離が長いと多い）
+			
+			const c_rank = c_ranks1[c_properties["rnkWidth"]]; //rankは何に使う？
+			//c_properties["type"] !== "通常部"の判定は必要？
+			
+			
+			const c_rids = {
+				"50040-13065-i-516": true, //上信電鉄、鶴辺団地
+				"50040-13065-i-656": true,
+				"50040-13068-i-982": true,
+				"50040-13068-i-1173": true,
+				"50043-13065-i-974": true, //上信電鉄、永福寺付近の交差点
+				"50085-13110-i-1368": true, //永井運輸、道の駅「赤城の恵」
+				"50085-13110-i-1349": true,
+				"50070-13107-i-3605": true //永井運輸、前橋高校
+			};
+			if (c_rids[c_properties["rID"]] !== undefined) {
+				continue;
+			}
+
+			
+			const c_distances = []; //各リンクの分割数（距離が長いと多い）
 			for (let i3 = 0; i3 < c_coordinates.length - 1; i3++) {
-				//緯度経度をそのまま用いて簡単に計算
-				c_distances.push(Math.ceil((((c_coordinates[i3 + 1][0] - c_coordinates[i3][0]) ** 2 + (c_coordinates[i3 + 1][1] - c_coordinates[i3][1]) ** 2) ** 0.5) * l_min_distance));
-				//c_distances.push(1);
+				c_distances.push(Math.ceil((((c_coordinates[i3 + 1][0] - c_coordinates[i3][0]) ** 2 + (c_coordinates[i3 + 1][1] - c_coordinates[i3][1]) ** 2) ** 0.5) * c_min_distance * c_ranks2[c_properties["rnkWidth"]])); //緯度経度から距離を簡易計算
 			}
+			
+			
 			//途中点を加え、前後の点をつなぐ
 			for (let i3 = 0; i3 < c_coordinates.length; i3++) {
 				const c_lon = c_coordinates[i3][0];
@@ -107,9 +131,8 @@ async function f_main() {
 					c_points[c_key]["rank"] = c_rank;
 				}
 				
-				//前の点
+				//前の点をnextに追加
 				if (i3 !== 0) {
-					//前のkey
 					const c_pre_keys = [];
 					const c_pre_point = "lon_" + c_coordinates[i3 - 1][0] + "_lat_" + c_coordinates[i3 - 1][1]; //最初の点
 					c_pre_keys.push(c_pre_point); //最初の点
@@ -130,14 +153,11 @@ async function f_main() {
 							c_pre_keys.push(c_key_i4);
 						}
 					}
-					//c_key_2 c_pre_point
-					//c_key_3 c_key_2
-					//c_key c_key_3
 					for (let i4 = 0; i4 < c_pre_keys.length - 1; i4++) {
 						c_points[c_pre_keys[i4 + 1]]["next"][c_pre_keys[i4]] = c_pre_keys[i4];
 					}
 				}
-				//後の点
+				//後の点をnextに追加
 				if (i3 !== c_coordinates.length - 1) {
 					const c_post_keys = [];
 					const c_post_point = "lon_" + c_coordinates[i3 + 1][0] + "_lat_" + c_coordinates[i3 + 1][1]; //最初の点
@@ -163,8 +183,6 @@ async function f_main() {
 						c_points[c_post_keys[i4 + 1]]["next"][c_post_keys[i4]] = c_post_keys[i4];
 					}
 				}
-				
-				
 			}
 		}
 	}
@@ -213,7 +231,7 @@ async function f_main() {
 		}
 		c_index["x_" + String(c_points[i1]["x_16"]) + "_y_" + String(c_points[i1]["y_16"])][i1] = c_points[i1];
 	}
-	//目次を作る
+	//目次を作る（18に細分化）
 	const c_index_18 = {};
 	for (let i1 in c_points) {
 		if (c_index_18["x_" + String(c_points[i1]["x_18"]) + "_y_" + String(c_points[i1]["y_18"])] === undefined) {
@@ -223,38 +241,18 @@ async function f_main() {
 	}
 
 
-	console.time("t5");
-	for (let i1 = 0; i1 < a_data["stops"].length; i1++) {
-		const c_stop = a_data["stops"][i1];
-		let l_nearest_point = null;
-		let l_distance_min = Number.MAX_SAFE_INTEGER;
-		for (let i2 = 0; i2 < 3; i2++) {
-			for (let i3 = 0; i3 < 3; i3++) {
-				for (let i4 in c_index_18["x_" + String(c_stop["x_18"] - 1 + i2) + "_y_" + String(c_stop["y_18"] - 1 + i3)]) {
-					//const c_distance = (Math.abs(c_points[i4]["x"] - c_stop["stop_x"]) + Math.abs(c_points[i4]["y"] - c_stop["stop_y"])) * c_points[i4]["rank"];
-					const c_distance = (((c_points[i4]["x"] - c_stop["stop_x"]) ** 2 + (c_points[i4]["y"] - c_stop["stop_y"]) ** 2) ** 0.5) * c_points[i4]["rank"];
-					if (c_distance < l_distance_min) {
-						l_nearest_point = i4;
-						l_distance_min = c_distance;
-					}
-				}
-			}
-		}
-		c_stop["nearest_point"] = l_nearest_point;
-	}
-	console.timeEnd("t5");
 
 
 	console.log(c_index);
 	console.time("t5_2");
+	//既存のshapesを道路中心線に紐づけする
 	for (let i1 = 0; i1 < a_data["shapes"].length; i1++) {
 		const c_shape = a_data["shapes"][i1];
 		let l_nearest_point = null;
 		let l_distance_min = Number.MAX_SAFE_INTEGER;
-		for (let i2 = 0; i2 < 3; i2++) {
-			for (let i3 = 0; i3 < 3; i3++) {
-				for (let i4 in c_index_18["x_" + String(c_shape["x_18"] - 1 + i2) + "_y_" + String(c_shape["y_18"] - 1 + i3)]) {
-					//const c_distance = (Math.abs(c_points[i4]["x"] - c_shape["shape_pt_x"]) + Math.abs(c_points[i4]["y"] - c_shape["shape_pt_y"])) * c_points[i4]["rank"];
+		for (let i2 = -1; i2 <= 1; i2++) {
+			for (let i3 = -1; i3 <= 1; i3++) {
+				for (let i4 in c_index_18["x_" + String(c_shape["x_18"] + i2) + "_y_" + String(c_shape["y_18"] + i3)]) {
 					const c_distance = (((c_points[i4]["x"] - c_shape["shape_pt_x"]) ** 2 + (c_points[i4]["y"] - c_shape["shape_pt_y"]) ** 2) ** 0.5) * c_points[i4]["rank"];
 					if (c_distance < l_distance_min) {
 						l_nearest_point = i4;
@@ -263,39 +261,14 @@ async function f_main() {
 				}
 			}
 		}
+		if (l_nearest_point === null) {
+			console.log("道路中心線対応付け失敗");
+		}
 		c_shape["nearest_point"] = l_nearest_point;
 	}
 	console.timeEnd("t5_2");
-
-
-	const c_stop_array = [];
-	/*
-	for (let i1 = 0; i1 < a_data["stop_times"].length; i1++) {
-		if (i1 > 0) {
-			if (a_data["stop_times"][i1 - 1]["stop_sequence"] > a_data["stop_times"][i1]["stop_sequence"]) {
-				break;
-			}
-		}
-		c_stop_array.push({"stop_id": a_data["stop_times"][i1]["stop_id"]});
-	}
-	for (let i1 = 0; i1 < c_stop_array.length; i1++) {
-		for (let i2 = 0; i2 < a_data["stops"].length; i2++) {
-			if (a_data["stops"][i2]["stop_id"] === c_stop_array[i1]["stop_id"]) {
-				c_stop_array[i1]["nearest_point"] = a_data["stops"][i2]["nearest_point"];
-			}
-		}
-	}
-	*/
-	for (i1 = 0; i1 < a_data["shapes"].length; i1++) {
-		if (i1 !== 0) {
-			if (a_data["shapes"][i1 - 1]["shape_id"] !== a_data["shapes"][i1]["shape_id"]) {
-				break;
-			}
-		}
-		c_stop_array.push({"nearest_point": a_data["shapes"][i1]["nearest_point"]});
-	}
-
 	
+	//既存のshapesをshape_id毎に分割してc_old_shapesに入れる
 	const c_old_shapes = [];
 	for (i1 = 0; i1 < a_data["shapes"].length; i1++) {
 		if (i1 === 0) {
@@ -317,17 +290,51 @@ async function f_main() {
 			}
 		}
 	}
-
-
+	
+	//2点間の組をまとめる（高速化）
+	const c_two_points = {};
+	for (let i1 = 0; i1 < c_old_shapes.length; i1++) {
+		for (let i2 = 0; i2 < c_old_shapes[i1].length - 1; i2++) {
+			const c_two_id_1 = c_old_shapes[i1][i2]["nearest_point"] + "_" + c_old_shapes[i1][i2 + 1]["nearest_point"];
+			const c_two_id_2 = c_old_shapes[i1][i2 + 1]["nearest_point"] + "_" + c_old_shapes[i1][i2]["nearest_point"];
+			if (c_two_points[c_two_id_1] === undefined) { //片方なければ逆もない
+				const c_add_1 = f_1(c_points, c_old_shapes[i1][i2]["nearest_point"], c_old_shapes[i1][i2 + 1]["nearest_point"]);
+				const c_add_2 = [];
+				for (let i1 = c_add_1.length - 1; i1 >= 0; i1--) {
+					c_add_2.push(c_add_1[i1]);
+				}
+				c_two_points[c_two_id_1] = c_add_1;
+				c_two_points[c_two_id_2] = c_add_2;
+			}
+		}
+	}
+	
 	//経路検索
 	console.time("t6");
 	const c_new_shapes = [];
 	for (let i1 = 0; i1 < c_old_shapes.length; i1++) {
 		c_new_shapes[i1] = [];
 		for (let i2 = 0; i2 < c_old_shapes[i1].length - 1; i2++) {
-			const c_add = f_1(c_points, c_old_shapes[i1][i2]["nearest_point"], c_old_shapes[i1][i2 + 1]["nearest_point"]);
+			const c_add = c_two_points[c_points, c_old_shapes[i1][i2]["nearest_point"] + "_" + c_old_shapes[i1][i2 + 1]["nearest_point"]];
+			//const c_add = f_1(c_points, c_old_shapes[i1][i2]["nearest_point"], c_old_shapes[i1][i2 + 1]["nearest_point"]); //遅い
+			if (c_add.length <= 2) {
+				document.getElementById("div_status").innerHTML +="異常に短い？" + String(i1) + "の" + String(i2);
+			}
+			
+			if (i2 === 0 && c_add.length > 2) { //始点端の処理
+				const c_last = f_hokan(c_points, c_add[c_add.length - 1], c_add[c_add.length - 2]);
+				if (c_last !== null) {
+					if (c_last !== c_new_shapes[i1][c_new_shapes[i1].length - 1]) { //重複しない場合
+						c_new_shapes[i1].push(c_last);
+					}
+				}
+			}
+			
 			for (let i3 = c_add.length - 1; i3 >= 0; i3--) {
-				if (i2 !== 0 && i3 === 0) {
+				if (i2 === 0 && i3 === c_add.length - 1) { //一番最初の点は先に追加
+					continue;
+				}
+				if (i3 === 0) { //後の点と重複、最後の点は後で追加
 					continue;
 				}
 				if (c_points[c_add[i3]] === undefined) {
@@ -338,34 +345,56 @@ async function f_main() {
 				}
 				c_new_shapes[i1].push(c_add[i3]);
 			}
-		}
-	}
-	console.timeEnd("t6");
-
-
-	//経路検索
-	/*
-	console.time("t6");
-	let l_r = [];
-	for (let i1 = 0; i1 < c_stop_array.length - 1; i1++) {
-		const c_add = f_1(c_points, c_stop_array[i1]["nearest_point"], c_stop_array[i1 + 1]["nearest_point"]);
-		for (let i2 = c_add.length - 1; i2 >= 0; i2--) {
-			if (i1 !== 0 && i2 === 0) {
-				continue;
+			
+			if (i2 === c_old_shapes[i1].length - 2 && c_add.length > 2) { //終点端の処理
+				const c_first = f_hokan(c_points, c_add[0], c_add[1]);
+				if (c_first !== null) {
+					c_new_shapes[i1].push(c_first);
+				}
 			}
-			l_r.push(c_add[i2]);
+			
 		}
 	}
-	console.log(l_r);
 	console.timeEnd("t6");
-	*/
+
+
+
 
 	let l_line_svg;
 
-	//オリジナル
-	for (i1 = 0; i1 < c_old_shapes.length; i1++) {
-		l_line_svg += "<path style=\"fill: none; stroke: #000000; stroke-width: 1px;\" d=\"";
-		for (i2 = 0; i2 < c_old_shapes[i1].length; i2++) {
+
+	//点
+	let l_circle = "";
+	for (let i1 = 0; i1 < c_new_shapes.length; i1++) {
+		for (let i2 = 0; i2 < c_new_shapes[i1].length; i2++) {
+			if (i1 === 0 || i2 === c_new_shapes[i1].length - 1) { 
+				l_circle += "<circle style=\"fill: none; stroke: #ff0000; stroke-width: 1px;\" r=\"4\" cx=\"" + String(c_points[c_new_shapes[i1][i2]]["x"] - c_xy["left_24"]) + "\" cy=\"" + String(c_points[c_new_shapes[i1][i2]]["y"] - c_xy["top_24"]) + "\" />";
+			} else {
+				l_circle += "<circle style=\"fill: none; stroke: #ff8080; stroke-width: 1px;\" r=\"2\" cx=\"" + String(c_points[c_new_shapes[i1][i2]]["x"] - c_xy["left_24"]) + "\" cy=\"" + String(c_points[c_new_shapes[i1][i2]]["y"] - c_xy["top_24"]) + "\" />";
+			}
+		}
+	}
+	//点
+	for (let i1 = 0; i1 < c_old_shapes.length; i1++) {
+		for (let i2 = 0; i2 < c_old_shapes[i1].length; i2++) {
+			l_circle += "<circle style=\"fill: none; stroke: #0080ff; stroke-width: 1px;\" r=\"3\" cx=\"" + String(c_old_shapes[i1][i2]["x"] - c_xy["left_24"]) + "\" cy=\"" + String(c_old_shapes[i1][i2]["y"] - c_xy["top_24"]) + "\" />";
+		}
+	}
+	//対応点
+	for (let i1 = 0; i1 < c_old_shapes.length; i1++) {
+		for (let i2 = 0; i2 < c_old_shapes[i1].length; i2++) {
+			const c_np = c_old_shapes[i1][i2]["nearest_point"];
+			const c_np_x = c_points[c_np]["x"];
+			const c_np_y = c_points[c_np]["y"];
+			l_circle += "<circle style=\"fill: none; stroke: #8000ff; stroke-width: 1px;\" r=\"3\" cx=\"" + String(c_np_x - c_xy["left_24"]) + "\" cy=\"" + String(c_np_y - c_xy["top_24"]) + "\" />";
+		}
+	}
+
+
+	//オリジナルshapes
+	for (let i1 = 0; i1 < c_old_shapes.length; i1++) {
+		l_line_svg += "<path style=\"fill: none; stroke: #808080; stroke-width: 1px;\" d=\"";
+		for (let i2 = 0; i2 < c_old_shapes[i1].length; i2++) {
 			if (i2 === 0) {
 				l_line_svg += "M ";
 			} else {
@@ -376,15 +405,16 @@ async function f_main() {
 		l_line_svg += "\" />"
 	}
 
-	//中心線
-	for (i1 = 0; i1 < c_new_shapes.length; i1++) {
+	//中心線shapes
+	for (let i1 = 0; i1 < c_new_shapes.length; i1++) {
 		l_line_svg += "<path style=\"fill: none; stroke: #ff0000; stroke-width: 1px;\" d=\"";
-		for (i2 = 0; i2 < c_new_shapes[i1].length; i2++) {
+		for (let i2 = 0; i2 < c_new_shapes[i1].length; i2++) {
 			if (i2 === 0) {
 				l_line_svg += "M ";
 			} else {
 				l_line_svg += " L ";
 			}
+			//console.log(c_new_shapes[i1][i2]);
 			l_line_svg += String(c_points[c_new_shapes[i1][i2]]["x"] - c_xy["left_24"]) + "," + String(c_points[c_new_shapes[i1][i2]]["y"] - c_xy["top_24"]);
 		}
 		l_line_svg += "\" />"
@@ -392,65 +422,23 @@ async function f_main() {
 
 	//対応線
 	let l_on_line;
-	for (i1 = 0; i1 < c_old_shapes.length; i1++) {
-		for (i2 = 0; i2 < c_old_shapes[i1].length; i2++) {
+	for (let i1 = 0; i1 < c_old_shapes.length; i1++) {
+		for (let i2 = 0; i2 < c_old_shapes[i1].length; i2++) {
 			const c_np = c_old_shapes[i1][i2]["nearest_point"];
 			const c_np_x = c_points[c_np]["x"];
 			const c_np_y = c_points[c_np]["y"];
-			l_line_svg += "<path style=\"fill: none; stroke: #00FF00; stroke-width: 1px;\" d=\"M ";
+			l_line_svg += "<path style=\"fill: none; stroke: #0000ff; stroke-width: 1px;\" d=\"M ";
 			l_line_svg += String(c_np_x - c_xy["left_24"]) + "," + String(c_np_y - c_xy["top_24"]);
 			l_line_svg += " L " + String(c_old_shapes[i1][i2]["x"] - c_xy["left_24"]) + "," + String(c_old_shapes[i1][i2]["y"] - c_xy["top_24"]);
 			l_line_svg += "\" />";
 		}
 	}
 
-	//点
-	let l_circle = "";
-	for (i1 = 0; i1 < c_new_shapes.length; i1++) {
-		for (i2 = 0; i2 < c_new_shapes[i1].length; i2++) {
-			l_circle += "<circle style=\"fill: none; stroke: #ff00ff; stroke-width: 1px;\" r=\"2\" cx=\"" + String(c_points[c_new_shapes[i1][i2]]["x"] - c_xy["left_24"]) + "\" cy=\"" + String(c_points[c_new_shapes[i1][i2]]["y"] - c_xy["top_24"]) + "\" />";
-		}
-	}
-	//点
-	for (i1 = 0; i1 < c_old_shapes.length; i1++) {
-		for (i2 = 0; i2 < c_old_shapes[i1].length; i2++) {
-			l_circle += "<circle style=\"fill: none; stroke: #00ffff; stroke-width: 1px;\" r=\"3\" cx=\"" + String(c_old_shapes[i1][i2]["x"] - c_xy["left_24"]) + "\" cy=\"" + String(c_old_shapes[i1][i2]["y"] - c_xy["top_24"]) + "\" />";
-		}
-	}
-
-
-/*
-	//オリジナル
-	l_line_svg += "<path style=\"fill: none; stroke: #000000; stroke-width: 1px;\" d=\"";
-	for (i1 = 0; i1 < a_data["shapes"].length; i1++) {
-		if (i1 === 0) {
-			l_line_svg += "M ";
-		} else {
-			if (a_data["shapes"][i1 - 1]["shape_id"] !== a_data["shapes"][i1]["shape_id"]) {
-				break;
-			}
-			l_line_svg += " L ";
-		}
-		l_line_svg += String(a_data["shapes"][i1]["shape_pt_x"] - c_xy["left_24"]) + "," + String(a_data["shapes"][i1]["shape_pt_y"] - c_xy["top_24"]);
-	}
-	l_line_svg += "\" />"
-	
-	//中心線
-	l_line_svg += "<path style=\"fill: none; stroke: #ff0000; stroke-width: 1px;\" d=\"";
-	for (i1 = 0; i1 < l_r.length; i1++) {
-		if (i1 === 0) {
-			l_line_svg += "M ";
-		} else {
-			l_line_svg += " L ";
-		}
-		l_line_svg += String(c_points[l_r[i1]]["x"] - c_xy["left_24"]) + "," + String(c_points[l_r[i1]]["y"] - c_xy["top_24"]);
-	}
-	l_line_svg += "\" />"
-*/
 
 
 
-	let l_svg = "<svg width=\"" + c_xy["width_24"] + "\" height=\"" + c_xy["height_24"] + "\" viewBox=\"0 0 " + c_xy["width_24"] + " " + c_xy["height_24"] + "\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" version=\"1.1\"><g transform=\"translate(" + /*String(-1 * c_xy["left_24"]) + "," + String(-1 * c_xy["top_24"]) +*/ ")\">" + l_line_svg + l_circle + "</g></svg>";
+
+	let l_svg = "<svg width=\"" + c_xy["width_24"] + "\" height=\"" + c_xy["height_24"] + "\" viewBox=\"0 0 " + c_xy["width_24"] + " " + c_xy["height_24"] + "\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" version=\"1.1\"><g transform=\"translate(" + /*String(-1 * c_xy["left_24"]) + "," + String(-1 * c_xy["top_24"]) +*/ ")\">" + l_circle + l_line_svg + "</g></svg>";
 
 
 
@@ -558,47 +546,68 @@ function f_number_gtfs(a_data) {
 	}
 }
 
-
+//必要な分だけ追加するように改造
+//GTFS-JP初版用（route_idごとにshape_idは一意に定まる場合に使える）
 function f_make_shape(a_data) {
-	if (a_data["shapes"] === undefined || a_data["shapes"].length === 0) {
-		let l_shapes = [];
-		for (let i1 = 0; i1 < a_data["routes"].length; i1++) {
-			let l_trip_id; //代表のtrip_id
-			console.log(a_data["routes"]);
-			for (let i2 = 0; i2 < a_data["trips"].length; i2++) {
-				if (a_data["routes"][i1]["route_id"] === a_data["trips"][i2]["route_id"]) { //tripを1つみつける。
-					l_trip_id = a_data["trips"][i2]["trip_id"];
+	if (a_data["shapes"] === undefined) {
+		a_data["shapes"] = [];
+	}
+	for (let i1 = 0; i1 < a_data["routes"].length; i1++) {
+		let l_trip_id; //代表のtrip_id
+		let l_shape_id = null;
+		let l_exist = false; //shapes_idがあればtrue
+		
+		console.log(a_data["routes"]);
+		
+		for (let i2 = 0; i2 < a_data["trips"].length; i2++) {
+			if (a_data["routes"][i1]["route_id"] === a_data["trips"][i2]["route_id"]) {
+				l_trip_id = a_data["trips"][i2]["trip_id"];
+				if (a_data["trips"][i2]["shape_id"] === undefined || a_data["trips"][i2]["shape_id"] === "") { //shape_idがない場合、補完する
 					a_data["trips"][i2]["shape_id"] = "shape_id_" + a_data["routes"][i1]["route_id"];
 				}
-			}
-			const c_shape_temp = []; //仮にstop_timesと緯度経度を集める
-			for (let i2 = 0; i2 < a_data["stop_times"].length; i2++) {
-				if (a_data["stop_times"][i2]["trip_id"] === l_trip_id) {
-					for (let i3 = 0; i3 < a_data["stops"].length; i3++) {
-						if (a_data["stop_times"][i2]["stop_id"] === a_data["stops"][i3]["stop_id"]) {
-							c_shape_temp.push({
-								"shape_id": "shape_id_" + a_data["routes"][i1]["route_id"],
-								"shape_pt_lat": a_data["stops"][i3]["stop_lat"],
-								"shape_pt_lon": a_data["stops"][i3]["stop_lon"],
-								"shape_pt_sequence": a_data["stop_times"][i2]["stop_sequence"]
-							});
-							break;
-						}
+				if (l_shape_id === null) {
+					l_shape_id = a_data["trips"][i2]["shape_id"];
+				} else if (l_shape_id !== a_data["trips"][i2]["shape_id"]) {
+					document.getElementById("div_status").innerHTML +="このGTFSは非対応";
+				}
+				for (let i3 = 0; i3 < a_data["shapes"].length; i3++) {
+					if (a_data["shapes"][i3]["shape_id"] === l_shape_id) { //shapesがすでにある
+						l_exist = true;
+						break;
 					}
 				}
 			}
-			c_shape_temp.sort(function(a1,a2) {
-				if (a1["shape_pt_sequence"] < a2["shape_pt_sequence"]) {
-					return -1;
-				}
-				if (a1["shape_pt_sequence"] > a2["shape_pt_sequence"]) {
-					return 1;
-				}
-				return 0;
-			});
-			l_shapes = l_shapes.concat(c_shape_temp);
 		}
-		a_data["shapes"] = l_shapes;
+		//すでにあるなら次へ
+		if (l_exist === true) {
+			continue;
+		}
+		const c_shape_temp = []; //仮にstop_timesと緯度経度を集める
+		for (let i2 = 0; i2 < a_data["stop_times"].length; i2++) {
+			if (a_data["stop_times"][i2]["trip_id"] === l_trip_id) {
+				for (let i3 = 0; i3 < a_data["stops"].length; i3++) {
+					if (a_data["stop_times"][i2]["stop_id"] === a_data["stops"][i3]["stop_id"]) {
+						c_shape_temp.push({
+							"shape_id": l_shape_id,
+							"shape_pt_lat": a_data["stops"][i3]["stop_lat"],
+							"shape_pt_lon": a_data["stops"][i3]["stop_lon"],
+							"shape_pt_sequence": a_data["stop_times"][i2]["stop_sequence"]
+						});
+						break;
+					}
+				}
+			}
+		}
+		c_shape_temp.sort(function(a1,a2) {
+			if (a1["shape_pt_sequence"] < a2["shape_pt_sequence"]) {
+				return -1;
+			}
+			if (a1["shape_pt_sequence"] > a2["shape_pt_sequence"]) {
+				return 1;
+			}
+			return 0;
+		});
+		a_data["shapes"] = a_data["shapes"].concat(c_shape_temp);
 	}
 }
 
@@ -710,9 +719,9 @@ function f_search(a_index_distance, a_previous_point, a_points, a1, a_end) {
 		console.log("ない");
 		return;
 	}
-	if (a1 > 200) {//無限ループ防止のため制限
+	if (a1 > c_loop) {//無限ループ防止のため制限
 		console.log(a_points);
-		console.log("200回");
+		console.log(String(c_loop) + "回");
 		return;
 	}
 	f_search(a_index_distance, a_previous_point, a_points, a1 + 1, a_end);
@@ -723,8 +732,8 @@ function f_add(a_previous_point, a_key, a_list, a_count) {
 	if (a_key === "start") {
 		return;
 	}
-	if (a_count > 200) {
-		console.log(a_key + "繰り返し200回");
+	if (a_count > c_loop) {
+		console.log(a_key + "繰り返し" + String(c_loop) + "回");
 		return;
 	}
 	a_list.push(a_key);
@@ -734,6 +743,21 @@ function f_add(a_previous_point, a_key, a_list, a_count) {
 
 
 
+
+function f_hokan(a_points, a_point, a_post_point) {
+	if (a_points[a_point] === undefined) {
+		return null;
+	}
+	if (a_points[a_point]["exist"] !== false) {
+		return a_point;
+	} else {
+		for (let i1 in a_points[a_point]["next"]) {
+			if (i1 !== a_post_point) {
+				return f_hokan(a_points, i1, a_point);
+			}
+		}
+	}
+}
 
 
 		//]]>
