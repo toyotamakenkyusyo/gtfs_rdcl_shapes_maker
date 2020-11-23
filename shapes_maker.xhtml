@@ -4,6 +4,7 @@
 	<head>
 		<meta charset="UTF-8" />
 		<style>body {font-family: IPAmjMincho;} pre {font-family: IPAmjMincho; white-space: pre-wrap;}</style>
+		<script src="https://cdn.jsdelivr.net/npm/zlibjs@0.3.1/bin/zip.min.js"></script>
 		<script src="https://cdn.jsdelivr.net/npm/zlibjs@0.3.1/bin/unzip.min.js"></script>
 	</head>
 	<body>
@@ -12,6 +13,7 @@
 			<input type="file" id="input" accept="application/zip" />
 		</div>
 		<div id="div_status"></div>
+		<div><a id="output_zip" download="GTFS_out">zip出力</a></div>
 		<div id="div_output"></div>
 		<script>
 		//<![CDATA[
@@ -32,8 +34,8 @@ function f_read(a) {
 async function f_main() {
 	console.time("t1");
 	const c_zoom_level = 16;
-	const c_array = c_reader.result;
-	const c_csv = f_zip_to_text(c_array);
+	const c_ArrayBuffer_in = c_reader.result;
+	const c_csv = f_zip_to_text_files(c_ArrayBuffer_in);
 	const c_file_names = ["agency", "agency_jp", "stops", "routes", "routes_jp", "trips", "office_jp", "stop_times", "calendar", "calendar_dates", "fare_attributes", "fare_rules", "shapes", "frequencies", "transfers", "feed_info", "translations"];
 	const c_json = {};
 	const a_data = c_json;
@@ -453,7 +455,16 @@ async function f_main() {
 		}
 	}
 	l_svg += "<pre>" + l_csv_shapes + "</pre>";
-
+	
+	c_csv["shapes.txt"] = l_csv_shapes;
+	//Zip出力
+	const c_ArrayBuffer_out = f_text_files_to_zip(c_csv);
+	const c_blob = new Blob([c_ArrayBuffer_out], {"type": "application/zip"});
+	if (window.navigator.msSaveBlob) { 
+		window.navigator.msSaveBlob(c_blob, "merge_gtfs"); 
+	} else {
+		document.getElementById("output_zip").href = window.URL.createObjectURL(c_blob);
+	}
 	console.log(c_json);
 	console.log(c_points);
 
@@ -482,17 +493,32 @@ function f_xhr_get(a_url, a_type) {
 }
 
 //ZIPの解凍
-function f_zip_to_text(a_array) {
-	const c_byte = new Uint8Array(a_array);
-	const c_unzip = new Zlib.Unzip(c_byte);
+function f_zip_to_text_files(a_ArrayBuffer) {
+	const c_Uint8Array = new Uint8Array(a_ArrayBuffer);
+	const c_unzip = new Zlib.Unzip(c_Uint8Array);
 	const c_filenames = c_unzip.getFilenames();
-	const c_plain = c_unzip.decompress(c_filenames[0]);
-	const c_files = {};
+	const c_text_files = {};
 	for (let i1 = 0; i1 < c_filenames.length; i1++) {
-		c_files[c_filenames[i1]] = new TextDecoder("utf-8").decode(Uint8Array.from(c_unzip.decompress(c_filenames[i1])).buffer);
+		c_text_files[c_filenames[i1]] = new TextDecoder().decode(c_unzip.decompress(c_filenames[i1]));
 	}
-	return c_files;
+	return c_text_files;
 }
+
+
+//ZIPの圧縮
+function f_text_files_to_zip(a_text_files) {
+	const c_zip = new Zlib.Zip();
+	for (let i1 in a_text_files) {
+		if (a_text_files[i1] !== "" && a_text_files[i1] !== null && a_text_files[i1] !== undefined) {
+			c_zip.addFile(new TextEncoder().encode(a_text_files[i1]), {"filename": new TextEncoder().encode(i1)});
+		}
+	}
+	const c_Uint8Array = c_zip.compress();
+	const c_ArrayBuffer = c_Uint8Array.buffer; 
+	return c_ArrayBuffer;
+}
+
+
 
 
 function f_csv_to_json(a_csv) {
