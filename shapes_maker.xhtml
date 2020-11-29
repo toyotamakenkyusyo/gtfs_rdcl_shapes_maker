@@ -449,14 +449,23 @@ async function f_main() {
 	l_csv_shapes += "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence";
 	for (let i1 = 0; i1 < c_new_shapes.length; i1++) {
 		for (let i2 = 0; i2 < c_new_shapes[i1].length; i2++) {
-			const c_lat = c_points[c_new_shapes[i1][i2]]["lat"];
-			const c_lon = c_points[c_new_shapes[i1][i2]]["lon"];
-			l_csv_shapes += "\n" + c_shape_ids[i1] + "," + c_lat + "," + c_lon + "," + String(i2);
+			let l_shape_id = c_shape_ids[i1];
+			//"をエスケープし、カンマと"があれば"で囲む
+			if (l_shape_id.indexOf("\"") !== -1 || l_shape_id.indexOf(",") !== -1) { //どちらかある
+				l_shape_id.replace(/"/g, "\"\"");
+				l_shape_id = "\"" + l_shape_id + "\"";
+			}
+			const c_lat = String(c_points[c_new_shapes[i1][i2]]["lat"]);
+			const c_lon = String(c_points[c_new_shapes[i1][i2]]["lon"]);
+			l_csv_shapes += "\r\n" + l_shape_id + "," + c_lat + "," + c_lon + "," + String(i2);
 		}
 	}
 	l_svg += "<pre>" + l_csv_shapes + "</pre>";
 	
 	c_csv["shapes.txt"] = l_csv_shapes;
+	
+	c_csv["trips.txt"] = f_json_to_csv(a_data["trips"]);
+	
 	//Zip出力
 	const c_ArrayBuffer_out = f_text_files_to_zip(c_csv);
 	const c_blob = new Blob([c_ArrayBuffer_out], {"type": "application/zip"});
@@ -550,6 +559,40 @@ function f_csv_to_json(a_csv) {
 	}
 	//この段階では全てテキストになっている。
 	return c_json;
+}
+
+
+function f_json_to_csv(a_json) {
+	//JSONからGTFSのCSVを出力する
+	let l_csv = "";
+	//1行目
+	for (const c_row of a_json) {
+		for (let i1 = 0; i1 < Object.keys(c_row).length; i1++) {
+			if (i1 !== 0) {
+				l_csv += ",";
+			}
+			l_csv += String(Object.keys(c_row)[i1]);
+		}
+		break;
+	}
+	//2行目以降
+	for (const c_row of a_json) {
+		const c_keys = Object.keys(c_row);
+		l_csv += "\r\n";
+		for (let i1 = 0; i1 < c_keys.length; i1++) {
+			if (i1 !== 0) {
+				l_csv += ",";
+			}
+			let l_text = String(c_row[c_keys[i1]]);
+			//"をエスケープし、カンマと"があれば"で囲む
+			if (l_text.indexOf("\"") !== -1 || l_text.indexOf(",") !== -1) { //どちらかある
+				l_text.replace(/"/g, "\"\"");
+				l_text = "\"" + l_text + "\"";
+			}
+			l_csv += l_text
+		}
+	}
+	return l_csv;
 }
 
 
