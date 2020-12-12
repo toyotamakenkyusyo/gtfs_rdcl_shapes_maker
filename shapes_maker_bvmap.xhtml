@@ -369,6 +369,9 @@ async function f_main() {
 				if (c_points[c_add[i3]]["exist"] === false) {
 					continue;
 				}
+				if (c_new_shapes[i1][c_new_shapes[i1].length - 1] === c_add[i3]) { //前と同じものは追加しない
+					continue;
+				}
 				c_new_shapes[i1].push(c_add[i3]);
 			}
 			
@@ -808,10 +811,7 @@ function f_make_shape(a_data) {
 			});
 		}
 	}
-	if (a_data["shapes"] === undefined) {
-		a_data["shapes"] = [];
-	}
-	a_data["shapes"] = a_data["shapes"].concat(c_new_shapes);
+	a_data["shapes"] = c_new_shapes;
 }
 
 
